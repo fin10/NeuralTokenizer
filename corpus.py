@@ -1,39 +1,38 @@
-import re
+import os
+
+from Morpheme import Morpheme
+from complex_morpheme_dict import ComplexMorphemeDict
 
 
 class Corpus:
-    __LABEL_PATTERN = re.compile('([^/]+)/([a-z]+)')
+    __complex_morpheme_dict = ComplexMorphemeDict(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), './dict/complex_morpheme.dict'))
 
-    def __init__(self, data: list):
+    def __init__(self, texts: list, labels: list):
         self.__items = []
 
-        for d in data:
+        for d in zip(texts, labels):
             text = []
             labels = []
+
             text_tokens = d[0].split(' ')
-            label_tokens = d[1].split(' ')
-            for text_token, label_token in zip(text_tokens, label_tokens):
-                label_txt = []
-                label_label = []
-                for token in label_token.split('+'):
-                    m = Corpus.__LABEL_PATTERN.match(token)
-                    label_txt += [ch for ch in m.group(1)]
-                    label_label += [m.group(2) for _ in range(len(m.group(1)))]
+            morpheme_tokens = d[1].split(' ')
+            for text_token, morpheme_token in zip(text_tokens, morpheme_tokens):
+                morpheme = Morpheme(morpheme_token)
 
-                for i in range(len(text_token)):
-                    text.append(text_token[i])
-                    if text_token[i] == label_txt[0]:
-                        label_txt.pop(0)
-                        labels.append(label_label.pop(0))
+                for ch in text_token:
+                    if ch == morpheme.text()[0]:
+                        ch, tag = morpheme.pop(0)
+                        text.append(ch)
+                        labels.append(tag)
                     else:
-                        label = ''
-                        while text_token[i + 1] != label_txt[0]:
-                            if len(label_txt) == 0:
-                                break
-                            label_txt.pop(0)
-                            label += label_label.pop(0)
-
-                        labels.append(label)
+                        tag, index = self.__complex_morpheme_dict.find(ch, morpheme)
+                        if tag is None:
+                            raise ValueError('Not found pattern. %s, %s' % (text_token, morpheme_token))
+                        text.append(ch)
+                        labels.append(tag)
+                        for _ in range(index):
+                            morpheme.pop(0)
 
                 text.append(' ')
                 labels.append('o')
@@ -52,7 +51,7 @@ class Corpus:
 
             self.__items.append(Corpus.Item(text, labels))
 
-    def size(self):
+    def __len__(self) -> int:
         return len(self.__items)
 
     def get(self, position):
@@ -75,3 +74,15 @@ class Corpus:
 
         def length(self):
             return self.__length
+
+
+if __name__ == '__main__':
+    with open('./data/sejong.txt') as fp:
+        texts = [line.strip() for line in fp]
+
+    with open('./data/sejong.pos') as fp:
+        labels = [line.strip() for line in fp]
+
+    print('texts:%d, labels:%d' % (len(texts), len(labels)))
+    corpus = Corpus(texts, labels)
+    print('corpus: %d' % len(corpus))
