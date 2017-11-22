@@ -1,16 +1,12 @@
-import os
-
-from Morpheme import Morpheme
-from complex_morpheme_dict import ComplexMorphemeDict
+from morpheme import Morpheme
 
 
 class Corpus:
-    __complex_morpheme_dict = ComplexMorphemeDict(
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), './dict/complex_morpheme.dict'))
 
     def __init__(self, texts: list, labels: list):
         self.__items = []
-
+        errors = set()
+        data_errors = []
         for d in zip(texts, labels):
             text = []
             labels = []
@@ -18,21 +14,13 @@ class Corpus:
             text_tokens = d[0].split(' ')
             morpheme_tokens = d[1].split(' ')
             for text_token, morpheme_token in zip(text_tokens, morpheme_tokens):
-                morpheme = Morpheme(morpheme_token)
-
-                for ch in text_token:
-                    if ch == morpheme.text()[0]:
-                        ch, tag = morpheme.pop(0)
-                        text.append(ch)
-                        labels.append(tag)
-                    else:
-                        tag, index = self.__complex_morpheme_dict.find(ch, morpheme)
-                        if tag is None:
-                            raise ValueError('Not found pattern. %s, %s' % (text_token, morpheme_token))
-                        text.append(ch)
-                        labels.append(tag)
-                        for _ in range(index):
-                            morpheme.pop(0)
+                try:
+                    labels += Morpheme(morpheme_token).match(text_token)
+                    text += [ch for ch in text_token]
+                except ValueError as e:
+                    errors.add(e)
+                except IndexError:
+                    data_errors.append('%s, %s' % (text_token, morpheme_token))
 
                 text.append(' ')
                 labels.append('o')
@@ -50,6 +38,14 @@ class Corpus:
                     labels[i] = 'i-' + labels[i]
 
             self.__items.append(Corpus.Item(text, labels))
+
+        print('Data Errors: %d' % len(data_errors))
+        with open('./data_errors.txt', mode='w', encoding='utf-8') as fp:
+            fp.write('\n'.join(data_errors))
+
+        print('Pattern Errors: %d' % len(errors))
+        with open('./pattern_errors.txt', mode='w', encoding='utf-8') as fp:
+            fp.write('\n'.join([str(error) for error in errors]))
 
     def __len__(self) -> int:
         return len(self.__items)

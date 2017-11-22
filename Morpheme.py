@@ -1,3 +1,4 @@
+import os
 import re
 
 
@@ -9,6 +10,8 @@ class Morpheme:
 
     __SLASH = '_slash_'
     __PLUS = '_plus_'
+
+    __matcher = None
 
     @classmethod
     def __encode(cls, labels: str):
@@ -23,8 +26,7 @@ class Morpheme:
         return text
 
     def __init__(self, raw: str):
-        self.__text = []
-        self.__tag = []
+        self.__tags = []
 
         raw = self.__encode(raw)
         for chunk in raw.split('+'):
@@ -33,20 +35,83 @@ class Morpheme:
             tag = m.group(2)
 
             text = self.__decode(text)
-            self.__text += [ch for ch in text]
-            self.__tag += [tag for _ in range(len(text))]
+            for ch in text:
+                self.__tags.append((ch, tag))
 
     def __len__(self) -> int:
-        return len(self.__text)
+        return len(self.__tags)
 
-    def text(self):
-        return self.__text
+    def __str__(self):
+        return '+'.join(['%s/%s' % (text, tag) for text, tag in self.__tags])
 
-    def tag(self):
-        return self.__tag
+    def tags(self):
+        return self.__tags
 
-    def pop(self, index=None):
-        return self.__text.pop(index), self.__tag.pop(index)
+    def match(self, chars):
+        if Morpheme.__matcher is None:
+            Morpheme.__matcher = Morpheme.Matcher(
+                os.path.join(os.path.dirname(os.path.abspath(__file__)), './res/complex_morpheme.dict'))
 
-    def get(self, index):
-        return self.__text[index], self.__tag[index]
+        tags = []
+        index = 0
+        for ch in chars:
+            if ch == self.__tags[index][0]:
+                tags.append(self.__tags[index][1])
+                index += 1
+            else:
+                tag, morpheme = self.__matcher.match(ch, self.__tags[index:])
+                if tag is None:
+                    raise ValueError('%s, %s' % (chars, self))
+                tags.append(tag)
+
+                if morpheme:
+                    index += len(morpheme)
+
+        return tags
+
+    class Matcher:
+
+        def __init__(self, path):
+            self.__dict = {}
+            with open(path) as fp:
+                for line in fp:
+                    items = line.strip().split(' ')
+                    key = Morpheme(items[0])
+                    value = Morpheme(items[1])
+                    excepted = True if len(items) > 2 else False
+
+                    text = key.tags()[0][0]
+                    tag = key.tags()[0][1]
+                    if text not in self.__dict:
+                        self.__dict[text] = Morpheme.ComplexMorpheme()
+                    self.__dict[text].add(value, tag, excepted)
+
+        def match(self, ch, tags):
+            cm = self.__dict.get(ch)
+            if cm:
+                return cm.find(tags)
+            else:
+                return None, None
+
+    class ComplexMorpheme:
+
+        def __init__(self):
+            self.__morphemes = []
+
+        def add(self, morpheme, tag, excepted):
+            self.__morphemes.append((morpheme, tag, excepted))
+
+        def find(self, tags):
+            for morpheme, tag, excepted in self.__morphemes:
+                found = True
+                for i in range(len(morpheme)):
+                    try:
+                        if morpheme.tags()[i] != tags[i]:
+                            found = False
+                    except IndexError:
+                        found = False
+
+                if found:
+                    return tag, morpheme if not excepted else None
+
+            return None, None

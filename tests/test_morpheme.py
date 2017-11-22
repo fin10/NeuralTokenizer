@@ -1,6 +1,6 @@
 import unittest
 
-from Morpheme import Morpheme
+from morpheme import Morpheme
 
 
 class MorphemeTest(unittest.TestCase):
