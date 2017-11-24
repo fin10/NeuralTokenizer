@@ -14,8 +14,8 @@ class NeuralPosTagger:
             'output_size': output_size,
             'vocab_size': vocab_size,
             'max_length': max_length,
-            'batch_size': 100,
-            'cell_size': 20,
+            'batch_size': 2000,
+            'cell_size': 150,
             'char_embedding_size': 100,
             'learning_rate': 0.001,
         })
@@ -85,16 +85,15 @@ class NeuralPosTagger:
             cell = tf.contrib.rnn.DropoutWrapper(cell, output_keep_prob=keep_prob)
             return cell
 
-        outputs, _ = tf.nn.dynamic_rnn(
-            cell=rnn_cell(cell_size),
-            # cell_fw=rnn_cell(cell_size),
-            # cell_bw=rnn_cell(cell_size),
+        outputs, _ = tf.nn.bidirectional_dynamic_rnn(
+            cell_fw=rnn_cell(cell_size),
+            cell_bw=rnn_cell(cell_size),
             inputs=inputs,
             sequence_length=lengths,
             dtype=tf.float32
         )
 
-        # outputs = outputs[0] + outputs[1]
+        outputs = outputs[0] + outputs[1]
 
         outputs = tf.contrib.layers.fully_connected(
             inputs=outputs,
@@ -147,16 +146,22 @@ class NeuralPosTagger:
 
     def fit(self, inputs):
         random.shuffle(inputs)
-        pivot = int(len(inputs) * 0.8)
+        pivot = int(len(inputs) * 0.99)
         train_set = inputs[:pivot]
         dev_set = inputs[pivot:]
 
         class ValidationHook(tf.train.SessionRunHook):
+
             def __init__(self, estimator, input_fn, dataset):
-                self.__every_n_steps = 10
+                self.__every_n_steps = 100
                 self.__estimator = estimator
                 self.__input_fn = input_fn
                 self.__dataset = dataset
+
+            @staticmethod
+            def chunks(l, n):
+                for i in range(0, len(l), n):
+                    yield l[i:i + n]
 
             def before_run(self, run_context):
                 graph = run_context.session.graph
@@ -164,11 +169,16 @@ class NeuralPosTagger:
 
             def after_run(self, run_context, run_values):
                 if run_values.results % self.__every_n_steps == 0:
-                    result = self.__estimator.evaluate(
-                        input_fn=lambda: self.__input_fn(self.__dataset),
-                        steps=1,
-                    )
-                    print(result)
+                    accuracy = []
+                    loss = []
+                    for chunk in self.chunks(self.__dataset, 2000):
+                        result = self.__estimator.evaluate(
+                            input_fn=lambda: self.__input_fn(chunk),
+                            steps=1,
+                        )
+                        accuracy.append(result['accuracy'])
+                        loss.append(result['loss'])
+                    print('#%d Accuracy: %s, Loss: %s' % (run_values.results, np.mean(accuracy), np.mean(loss)))
 
         self.__estimator.train(
             input_fn=lambda: self.__input_fn(train_set, batch_size=self.__params['batch_size'], shuffle=True),

@@ -13,9 +13,6 @@ class Corpus:
                     'length': len(line[0])
                 })
 
-                if len(self.__items) > 1000:
-                    break
-
     def __len__(self) -> int:
         return len(self.__items)
 
