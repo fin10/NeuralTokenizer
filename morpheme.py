@@ -14,10 +14,10 @@ class Morpheme:
     __matcher = None
 
     @classmethod
-    def __encode(cls, labels: str):
-        labels = cls.__SLASH_PATTERN.sub(cls.__SLASH + '/' + '\g<2>', labels)
-        labels = cls.__PLUS_PATTERN.sub(cls.__PLUS + '/' + '\g<2>', labels)
-        return labels
+    def __encode(cls, text: str):
+        text = cls.__SLASH_PATTERN.sub(cls.__SLASH + '/' + '\g<2>', text)
+        text = cls.__PLUS_PATTERN.sub(cls.__PLUS + '/' + '\g<2>', text)
+        return text
 
     @classmethod
     def __decode(cls, text: str):
@@ -53,26 +53,21 @@ class Morpheme:
                 os.path.join(os.path.dirname(os.path.abspath(__file__)), './res/complex_morpheme.dict'))
 
         tags = [None for _ in range(len(targets))]
-        remaining = list(self.__tags)
         index = 0
-        for tag in self.__tags:
-            for i in range(index, len(targets)):
-                if tag[0].lower() == targets[i].lower():
-                    tags[i] = tag[1]
-                    remaining.remove(tag)
-                    index = i + 1
+        for i in range(len(targets)):
+            for j in range(index, len(self)):
+                if targets[i].lower() == self.__tags[j][0].lower():
+                    tags[i] = self.__tags[j][1]
+                    index += 1
                     break
+            if tags[i] is None:
+                tag, matches = Morpheme.__matcher.match(targets[i], self.__tags[index:])
+                if tag is None:
+                    raise ValueError('Not found patterns for %s, %s' % (targets, self))
+                else:
+                    tags[i] = tag
+                    index += len(matches)
 
-        if None in tags:
-            for i in range(len(tags)):
-                if tags[i] is None:
-                    tag, matches = Morpheme.__matcher.match(targets[i], remaining)
-                    if tag is None:
-                        raise ValueError('%s %s' % (targets, self))
-                    else:
-                        tags[i] = tag
-                        for match in matches:
-                            remaining.remove(match)
         return tags
 
     class Matcher:

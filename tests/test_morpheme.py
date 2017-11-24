@@ -52,3 +52,21 @@ class MorphemeTest(unittest.TestCase):
         morpheme = Morpheme(test_case[1])
         result = morpheme.match(test_case[0])
         self.assertEqual(['vx', 'epef', 'ef', 'ef', 'sf'], result)
+
+    def test_match6(self):
+        test_case = ('웃으면', '웃/vb+면/ef')
+        morpheme = Morpheme(test_case[1])
+        result = morpheme.match(test_case[0])
+        self.assertEqual(['vb', 'mg', 'ef'], result)
+
+    def test_match7(self):
+        test_case = ('있으므로', '있/vx+므/ec+로/ec')
+        morpheme = Morpheme(test_case[1])
+        result = morpheme.match(test_case[0])
+        self.assertEqual(['vx', 'mg', 'ec', 'ec'], result)
+
+    def test_match8(self):
+        test_case = ('일컬어진다.', '일/vb+컫/vb+어/ex+지/vx+ㄴ/ef+다/ef+./sf')
+        morpheme = Morpheme(test_case[1])
+        result = morpheme.match(test_case[0])
+        self.assertEqual(['vb', 'vb', 'ex', 'vxef', 'ef', 'sf'], result)

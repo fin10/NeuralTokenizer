@@ -6,42 +6,35 @@ class Corpus:
     def __init__(self, texts: list, labels: list):
         self.__items = []
         errors = set()
-        data_errors = []
-        for d in zip(texts, labels):
-            text = []
-            labels = []
+        for text, label in zip(texts, labels):
+            chars = []
+            tags = []
 
-            text_tokens = d[0].split(' ')
-            morpheme_tokens = d[1].split(' ')
-            for text_token, morpheme_token in zip(text_tokens, morpheme_tokens):
-                try:
-                    labels += Morpheme(morpheme_token).match(text_token)
-                    text += [ch for ch in text_token]
-                except ValueError as e:
-                    errors.add(e)
-                except IndexError:
-                    data_errors.append('%s, %s' % (text_token, morpheme_token))
+            try:
+                text_tokens = text.split(' ')
+                morpheme_tokens = label.split(' ')
+                for text_token, morpheme_token in zip(text_tokens, morpheme_tokens):
+                    chars += [ch for ch in text_token]
+                    tags += Morpheme(morpheme_token).match(text_token)
+                    chars.append(' ')
+                    tags.append('o')
 
-                text.append(' ')
-                labels.append('o')
+                chars = chars[0:-1]
+                tags = tags[0:-1]
 
-            text = text[0:-1]
-            labels = labels[0:-1]
+                for i in range(len(tags)):
+                    if tags[i] == 'o':
+                        continue
 
-            for i in range(len(labels)):
-                if labels[i] == 'o':
-                    continue
+                    if i == 0 or not tags[i - 1].endswith(tags[i]):
+                        tags[i] = 'b-' + tags[i]
+                    else:
+                        tags[i] = 'i-' + tags[i]
 
-                if i == 0 or not labels[i - 1].endswith(labels[i]):
-                    labels[i] = 'b-' + labels[i]
-                else:
-                    labels[i] = 'i-' + labels[i]
+                self.__items.append(Corpus.Item(chars, tags))
 
-            self.__items.append(Corpus.Item(text, labels))
-
-        print('Data Errors: %d' % len(data_errors))
-        with open('./data_errors.txt', mode='w', encoding='utf-8') as fp:
-            fp.write('\n'.join(data_errors))
+            except ValueError as e:
+                errors.add(e)
 
         print('Pattern Errors: %d' % len(errors))
         with open('./pattern_errors.txt', mode='w', encoding='utf-8') as fp:
@@ -49,6 +42,11 @@ class Corpus:
 
     def __len__(self) -> int:
         return len(self.__items)
+
+    def export(self):
+        with open('./corpus.output', mode='w', encoding='utf-8') as fp:
+            for item in self.__items:
+                fp.write('%s\t%s\n' % (''.join(item.text()), ' '.join(item.labels())))
 
     def get(self, position):
         return self.__items[position]
@@ -82,3 +80,5 @@ if __name__ == '__main__':
     print('texts:%d, labels:%d' % (len(texts), len(labels)))
     corpus = Corpus(texts, labels)
     print('corpus: %d' % len(corpus))
+
+    corpus.export()
