@@ -64,10 +64,10 @@ class SejongCorpusParser:
 
 
 if __name__ == '__main__':
-    with open('./data/sejong.txt') as fp:
+    with open('./data/sejong.txt', encoding='utf-8') as fp:
         texts = [line.strip() for line in fp]
 
-    with open('./data/sejong.pos') as fp:
+    with open('./data/sejong.pos', encoding='utf-8') as fp:
         labels = [line.strip() for line in fp]
 
     print('texts:%d, labels:%d' % (len(texts), len(labels)))

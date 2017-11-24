@@ -74,7 +74,7 @@ class Morpheme:
 
         def __init__(self, path):
             self.__dict = {}
-            with open(path) as fp:
+            with open(path, encoding='utf-8') as fp:
                 for line in fp:
                     items = line.strip().split(' ')
                     key = items[0]
