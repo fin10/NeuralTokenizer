@@ -1,6 +1,5 @@
 import random
 
-import numpy as np
 import tensorflow as tf
 
 tf.logging.set_verbosity(tf.logging.INFO)
@@ -31,33 +30,37 @@ class NeuralPosTagger:
         )
 
     @classmethod
-    def __input_fn(cls, inputs, batch_size=-1, shuffle=False):
-        features = {
-            'ids': [],
-            'lengths': [],
-            'masks': []
-        }
-        labels = []
-
-        if shuffle:
-            random.shuffle(inputs)
-
-        if 0 < batch_size < len(inputs):
-            inputs = inputs[:batch_size]
-
+    def __input_fn(cls, inputs, batch_size=-1):
+        if batch_size < 0:
+            batch_size = len(inputs)
         max_length = cls.__params['max_length']
-        for i in inputs:
-            features['ids'].append(i['x'])
-            features['lengths'].append(i['length'])
-            features['masks'].append([1.0 if n < i['length'] else 0.0 for n in range(max_length)])
-            labels.append(i['y'])
 
-        features['ids'] = tf.constant(np.asarray(features['ids']))
-        features['lengths'] = tf.constant(features['lengths'])
-        features['masks'] = tf.constant(features['masks'])
-        labels = tf.constant(np.asarray(labels))
+        def gen(records: list):
+            for record in records:
+                yield {
+                          'ids': tf.constant(record['x']),
+                          'length': tf.constant(record['length']),
+                          'mask': tf.constant([1.0 if n < record['length'] else 0.0 for n in range(max_length)]),
+                      }, tf.constant(record['y'])
 
-        return features, labels
+        dataset = tf.data.Dataset.from_generator(
+            lambda: gen(inputs),
+            ({'ids': tf.int32, 'length': tf.int32, 'mask': tf.float32}, tf.int32),
+            ({
+                 'ids': tf.TensorShape([max_length]),
+                 'length': tf.TensorShape([]),
+                 'mask': tf.TensorShape([max_length])
+             }, tf.TensorShape([max_length]))
+        )
+
+        dataset.shuffle(len(inputs))
+        dataset = dataset.batch(batch_size)
+        dataset = dataset.repeat(1)
+
+        iterator = dataset.make_one_shot_iterator()
+        features, label = iterator.get_next()
+
+        return features, label
 
     @staticmethod
     def __model_fn(features, labels, mode, params):
@@ -69,8 +72,8 @@ class NeuralPosTagger:
         keep_prob = 1.0 if mode != tf.contrib.learn.ModeKeys.TRAIN else 0.5
 
         ids = features['ids']
-        lengths = features['lengths']
-        masks = features['masks']
+        length = features['length']
+        mask = features['mask']
 
         char_embeddings = tf.get_variable(
             name='char_embeddings',
@@ -89,7 +92,7 @@ class NeuralPosTagger:
             cell_fw=rnn_cell(cell_size),
             cell_bw=rnn_cell(cell_size),
             inputs=inputs,
-            sequence_length=lengths,
+            sequence_length=length,
             dtype=tf.float32
         )
 
@@ -109,14 +112,14 @@ class NeuralPosTagger:
             loss = tf.losses.softmax_cross_entropy(
                 onehot_labels=onehot_labels,
                 logits=outputs,
-                weights=masks
+                weights=mask
             )
 
             eval_metric_ops = {
                 'accuracy': tf.metrics.accuracy(
                     labels=labels,
                     predictions=predictions,
-                    weights=masks
+                    weights=mask
                 )
             }
 
@@ -158,31 +161,21 @@ class NeuralPosTagger:
                 self.__input_fn = input_fn
                 self.__dataset = dataset
 
-            @staticmethod
-            def chunks(l, n):
-                for i in range(0, len(l), n):
-                    yield l[i:i + n]
-
             def before_run(self, run_context):
                 graph = run_context.session.graph
                 return tf.train.SessionRunArgs(tf.train.get_global_step(graph))
 
             def after_run(self, run_context, run_values):
                 if run_values.results % self.__every_n_steps == 0:
-                    accuracy = []
-                    loss = []
-                    for chunk in self.chunks(self.__dataset, 2000):
-                        result = self.__estimator.evaluate(
-                            input_fn=lambda: self.__input_fn(chunk),
-                            steps=1,
-                        )
-                        accuracy.append(result['accuracy'])
-                        loss.append(result['loss'])
-                    print('#%d Accuracy: %s, Loss: %s' % (run_values.results, np.mean(accuracy), np.mean(loss)))
+                    result = self.__estimator.evaluate(
+                        input_fn=lambda: self.__input_fn(self.__dataset),
+                        steps=1,
+                    )
+                    print('#%d Accuracy: %s, Loss: %s' % (run_values.results, result['accuracy'], result['loss']))
 
         self.__estimator.train(
-            input_fn=lambda: self.__input_fn(train_set, batch_size=self.__params['batch_size'], shuffle=True),
-            hooks=[ValidationHook(self.__estimator, self.__input_fn, dev_set)],
+            input_fn=lambda: self.__input_fn(train_set, batch_size=self.__params['batch_size']),
+            # hooks=[ValidationHook(self.__estimator, self.__input_fn, dev_set)],
         )
 
     def eval(self, inputs):
