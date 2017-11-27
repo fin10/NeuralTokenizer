@@ -13,9 +13,9 @@ class NeuralPosTagger:
             'output_size': output_size,
             'vocab_size': vocab_size,
             'max_length': max_length,
-            'batch_size': 2000,
-            'cell_size': 150,
-            'char_embedding_size': 100,
+            'batch_size': 1000,
+            'cell_size': 300,
+            'char_embedding_size': 150,
             'learning_rate': 0.001,
         })
 
