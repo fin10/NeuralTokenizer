@@ -30,18 +30,17 @@ class NeuralPosTagger:
         )
 
     @classmethod
-    def __input_fn(cls, inputs, batch_size=-1):
-        if batch_size < 0:
-            batch_size = len(inputs)
+    def __input_fn(cls, inputs, epoch=1):
+        batch_size = cls.__params['batch_size'] if cls.__params['batch_size'] > 0 else len(inputs)
         max_length = cls.__params['max_length']
 
         def gen(records: list):
             for record in records:
                 yield {
-                          'ids': tf.constant(record['x']),
-                          'length': tf.constant(record['length']),
-                          'mask': tf.constant([1.0 if n < record['length'] else 0.0 for n in range(max_length)]),
-                      }, tf.constant(record['y'])
+                          'ids': record['x'],
+                          'length': record['length'] if record['length'] < max_length else max_length,
+                          'mask': [1.0 if n < record['length'] else 0.0 for n in range(max_length)],
+                      }, record['y']
 
         dataset = tf.data.Dataset.from_generator(
             lambda: gen(inputs),
@@ -53,9 +52,9 @@ class NeuralPosTagger:
              }, tf.TensorShape([max_length]))
         )
 
-        dataset.shuffle(len(inputs))
+        dataset = dataset.shuffle(batch_size)
         dataset = dataset.batch(batch_size)
-        dataset = dataset.repeat(1)
+        dataset = dataset.repeat(epoch)
 
         iterator = dataset.make_one_shot_iterator()
         features, label = iterator.get_next()
@@ -98,9 +97,11 @@ class NeuralPosTagger:
 
         outputs = outputs[0] + outputs[1]
 
-        outputs = tf.contrib.layers.fully_connected(
+        outputs = tf.layers.dense(
             inputs=outputs,
-            num_outputs=output_size,
+            units=output_size,
+            activation=tf.nn.relu,
+            kernel_initializer=tf.contrib.layers.xavier_initializer()
         )
 
         predictions = tf.argmax(outputs, 2)
@@ -149,7 +150,7 @@ class NeuralPosTagger:
 
     def fit(self, inputs):
         random.shuffle(inputs)
-        pivot = int(len(inputs) * 0.99)
+        pivot = int(len(inputs) * 0.8)
         train_set = inputs[:pivot]
         dev_set = inputs[pivot:]
 
@@ -169,19 +170,17 @@ class NeuralPosTagger:
                 if run_values.results % self.__every_n_steps == 0:
                     result = self.__estimator.evaluate(
                         input_fn=lambda: self.__input_fn(self.__dataset),
-                        steps=1,
                     )
                     print('#%d Accuracy: %s, Loss: %s' % (run_values.results, result['accuracy'], result['loss']))
 
         self.__estimator.train(
-            input_fn=lambda: self.__input_fn(train_set, batch_size=self.__params['batch_size']),
-            # hooks=[ValidationHook(self.__estimator, self.__input_fn, dev_set)],
+            input_fn=lambda: self.__input_fn(train_set, epoch=10),
+            hooks=[ValidationHook(self.__estimator, self.__input_fn, dev_set)],
         )
 
     def eval(self, inputs):
         return self.__estimator.evaluate(
             input_fn=lambda: self.__input_fn(inputs),
-            steps=1,
         )['accuracy']
 
     def predict(self, inputs):
