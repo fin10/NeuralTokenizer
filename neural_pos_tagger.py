@@ -15,12 +15,11 @@ tf.logging.set_verbosity(tf.logging.INFO)
 class NeuralPosTagger:
     MAX_SENTENCE_LENGTH = 100
 
-    __CHAR_PROCESSOR = 'char_processor.pkl'
-    __TAG_PROCESSOR = 'tag_processor.pkl'
+    __CHAR_PROCESSOR_NAME = 'char_processor.pkl'
+    __TAG_PROCESSOR_NAME = 'tag_processor.pkl'
 
     def __init__(self, model_dir):
         self.__params = {
-            'max_length': self.MAX_SENTENCE_LENGTH,
             'batch_size': 1000,
             'epoch_size': 2,
             'cell_size': 300,
@@ -29,8 +28,8 @@ class NeuralPosTagger:
         }
 
         self.__model_path = model_dir
-        self.__char_processor_path = os.path.join(self.__model_path, self.__CHAR_PROCESSOR)
-        self.__tag_processor_path = os.path.join(self.__model_path, self.__TAG_PROCESSOR)
+        self.__char_processor_path = os.path.join(self.__model_path, self.__CHAR_PROCESSOR_NAME)
+        self.__tag_processor_path = os.path.join(self.__model_path, self.__TAG_PROCESSOR_NAME)
 
         self.__char_processor = None
         self.__tag_processor = None
@@ -39,15 +38,15 @@ class NeuralPosTagger:
         if os.path.exists(self.__model_path):
             self.__char_processor = VocabularyProcessor.restore(self.__char_processor_path)
             self.__tag_processor = VocabularyProcessor.restore(self.__tag_processor_path)
-
-            self.__params.update({
-                'output_size': len(self.__tag_processor.vocabulary_),
-                'vocab_size': len(self.__char_processor.vocabulary_),
-            })
-
             self.__estimator = self.__create_estimator()
 
     def __create_estimator(self):
+        params = dict(self.__params)
+        params.update({
+            'output_size': len(self.__tag_processor.vocabulary_),
+            'vocab_size': len(self.__char_processor.vocabulary_),
+        })
+
         return tf.estimator.Estimator(
             model_fn=self.__model_fn,
             model_dir=self.__model_path,
@@ -55,7 +54,7 @@ class NeuralPosTagger:
                 save_summary_steps=10,
                 save_checkpoints_steps=10,
             ),
-            params=self.__params,
+            params=params,
         )
 
     @staticmethod
@@ -68,7 +67,7 @@ class NeuralPosTagger:
 
     def __input_fn(self, inputs, epoch=1):
         batch_size = self.__params['batch_size'] if self.__params['batch_size'] > 0 else len(inputs)
-        max_length = self.__params['max_length']
+        max_length = self.MAX_SENTENCE_LENGTH
 
         def gen(records: list):
             for record in records:
@@ -193,14 +192,12 @@ class NeuralPosTagger:
             tokenizer_fn=NeuralPosTagger.tag_tokenizer_fn
         )
 
-        items = []
         training_corpus = Corpus(corpus_path)
-        for item in training_corpus.items():
-            items.append({
-                'x': list(self.__char_processor.transform(item['text']))[0],
-                'y': list(self.__tag_processor.transform(item['tag']))[0],
-                'length': item['length']
-            })
+        items = [{
+            'x': list(self.__char_processor.transform(item['text']))[0],
+            'y': list(self.__tag_processor.transform(item['tag']))[0],
+            'length': item['length']
+        } for item in training_corpus.items()]
 
         self.__char_processor.fit('')
         self.__tag_processor.fit('')
@@ -211,17 +208,11 @@ class NeuralPosTagger:
         os.makedirs(self.__model_path)
         self.__char_processor.save(self.__char_processor_path)
         self.__tag_processor.save(self.__tag_processor_path)
-
-        self.__params.update({
-            'output_size': len(self.__tag_processor.vocabulary_),
-            'vocab_size': len(self.__char_processor.vocabulary_),
-        })
-
         self.__estimator = self.__create_estimator()
 
         print('Training: %d' % len(training_corpus))
-        print(
-            'Character: %d, Tag: %d' % (len(self.__char_processor.vocabulary_), len(self.__tag_processor.vocabulary_)))
+        print('Character: %d, Tag: %d' % (len(self.__char_processor.vocabulary_),
+                                          len(self.__tag_processor.vocabulary_)))
 
         lengths = [item['length'] for item in items]
         print('# Length')
@@ -259,14 +250,12 @@ class NeuralPosTagger:
         print('Training completed.')
 
     def evaluate(self, corpus_path):
-        test_set = []
         test_corpus = Corpus(corpus_path)
-        for item in test_corpus.items():
-            test_set.append({
-                'x': list(self.__char_processor.transform(item['text']))[0],
-                'y': list(self.__tag_processor.transform(item['tag']))[0],
-                'length': item['length']
-            })
+        test_set = [{
+            'x': list(self.__char_processor.transform(item['text']))[0],
+            'y': list(self.__tag_processor.transform(item['tag']))[0],
+            'length': item['length']
+        } for item in test_corpus.items()]
 
         result = self.__estimator.evaluate(
             input_fn=lambda: self.__input_fn(test_set),
@@ -278,7 +267,7 @@ class NeuralPosTagger:
     def predict(self, characters: list):
         data_set = [{
             'x': list(self.__char_processor.transform(characters))[0],
-            'y': [0 for _ in range(self.__params['max_length'])],
+            'y': [0 for _ in range(self.MAX_SENTENCE_LENGTH)],
             'length': len(characters)
         }]
 
