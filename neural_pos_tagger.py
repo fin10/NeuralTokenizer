@@ -1,27 +1,56 @@
+import os
 import random
+import shutil
+from collections import Counter
 
+import numpy as np
 import tensorflow as tf
+from tensorflow.contrib.learn.python.learn.preprocessing import VocabularyProcessor
+
+from corpus import Corpus
 
 tf.logging.set_verbosity(tf.logging.INFO)
 
 
 class NeuralPosTagger:
-    __params = {}
+    MAX_SENTENCE_LENGTH = 100
 
-    def __init__(self, output_size, vocab_size, max_length, model_dir):
-        self.__params.update({
-            'output_size': output_size,
-            'vocab_size': vocab_size,
-            'max_length': max_length,
+    __CHAR_PROCESSOR = 'char_processor.pkl'
+    __TAG_PROCESSOR = 'tag_processor.pkl'
+
+    def __init__(self, model_dir):
+        self.__params = {
+            'max_length': self.MAX_SENTENCE_LENGTH,
             'batch_size': 1000,
+            'epoch_size': 2,
             'cell_size': 300,
-            'char_embedding_size': 150,
+            'char_embedding_size': 300,
             'learning_rate': 0.001,
-        })
+        }
 
-        self.__estimator = tf.estimator.Estimator(
+        self.__model_path = model_dir
+        self.__char_processor_path = os.path.join(self.__model_path, self.__CHAR_PROCESSOR)
+        self.__tag_processor_path = os.path.join(self.__model_path, self.__TAG_PROCESSOR)
+
+        self.__char_processor = None
+        self.__tag_processor = None
+        self.__estimator = None
+
+        if os.path.exists(self.__model_path):
+            self.__char_processor = VocabularyProcessor.restore(self.__char_processor_path)
+            self.__tag_processor = VocabularyProcessor.restore(self.__tag_processor_path)
+
+            self.__params.update({
+                'output_size': len(self.__tag_processor.vocabulary_),
+                'vocab_size': len(self.__char_processor.vocabulary_),
+            })
+
+            self.__estimator = self.__create_estimator()
+
+    def __create_estimator(self):
+        return tf.estimator.Estimator(
             model_fn=self.__model_fn,
-            model_dir=model_dir,
+            model_dir=self.__model_path,
             config=tf.estimator.RunConfig(
                 save_summary_steps=10,
                 save_checkpoints_steps=10,
@@ -29,22 +58,29 @@ class NeuralPosTagger:
             params=self.__params,
         )
 
-    @classmethod
-    def __input_fn(cls, inputs, epoch=1):
-        batch_size = cls.__params['batch_size'] if cls.__params['batch_size'] > 0 else len(inputs)
-        max_length = cls.__params['max_length']
+    @staticmethod
+    def char_tokenizer_fn(raw):
+        return [[ch for ch in raw]]
+
+    @staticmethod
+    def tag_tokenizer_fn(raw):
+        return [raw.split(' ')]
+
+    def __input_fn(self, inputs, epoch=1):
+        batch_size = self.__params['batch_size'] if self.__params['batch_size'] > 0 else len(inputs)
+        max_length = self.__params['max_length']
 
         def gen(records: list):
             for record in records:
                 yield {
                           'ids': record['x'],
                           'length': record['length'] if record['length'] < max_length else max_length,
-                          'mask': [1.0 if n < record['length'] else 0.0 for n in range(max_length)],
+                          'mask': [1 if n < record['length'] else 0 for n in range(max_length)],
                       }, record['y']
 
         dataset = tf.data.Dataset.from_generator(
             lambda: gen(inputs),
-            ({'ids': tf.int32, 'length': tf.int32, 'mask': tf.float32}, tf.int32),
+            ({'ids': tf.int32, 'length': tf.int32, 'mask': tf.int32}, tf.int32),
             ({
                  'ids': tf.TensorShape([max_length]),
                  'length': tf.TensorShape([]),
@@ -140,19 +176,62 @@ class NeuralPosTagger:
 
         return tf.estimator.EstimatorSpec(
             mode=mode,
-            predictions={
-                'predictions': predictions
-            },
+            predictions=predictions,
             loss=loss,
             train_op=train_op,
             eval_metric_ops=eval_metric_ops
         )
 
-    def fit(self, inputs):
-        random.shuffle(inputs)
-        pivot = int(len(inputs) * 0.8)
-        train_set = inputs[:pivot]
-        dev_set = inputs[pivot:]
+    def train(self, corpus_path):
+        self.__char_processor = VocabularyProcessor(
+            max_document_length=self.MAX_SENTENCE_LENGTH,
+            tokenizer_fn=NeuralPosTagger.char_tokenizer_fn
+        )
+
+        self.__tag_processor = VocabularyProcessor(
+            max_document_length=self.MAX_SENTENCE_LENGTH,
+            tokenizer_fn=NeuralPosTagger.tag_tokenizer_fn
+        )
+
+        items = []
+        training_corpus = Corpus(corpus_path)
+        for item in training_corpus.items():
+            items.append({
+                'x': list(self.__char_processor.transform(item['text']))[0],
+                'y': list(self.__tag_processor.transform(item['tag']))[0],
+                'length': item['length']
+            })
+
+        self.__char_processor.fit('')
+        self.__tag_processor.fit('')
+
+        if os.path.exists(self.__model_path):
+            shutil.rmtree(self.__model_path)
+
+        os.makedirs(self.__model_path)
+        self.__char_processor.save(self.__char_processor_path)
+        self.__tag_processor.save(self.__tag_processor_path)
+
+        self.__params.update({
+            'output_size': len(self.__tag_processor.vocabulary_),
+            'vocab_size': len(self.__char_processor.vocabulary_),
+        })
+
+        self.__estimator = self.__create_estimator()
+
+        print('Training: %d' % len(training_corpus))
+        print(
+            'Character: %d, Tag: %d' % (len(self.__char_processor.vocabulary_), len(self.__tag_processor.vocabulary_)))
+
+        lengths = [item['length'] for item in items]
+        print('# Length')
+        print('avg: %s, top: %s' % (np.mean(lengths), Counter(lengths).most_common(10)))
+        print('longest: %d, shortest: %d' % (max(lengths), min(lengths)))
+
+        random.shuffle(items)
+        pivot = int(len(items) * 0.8)
+        train_set = items[:pivot]
+        dev_set = items[pivot:]
 
         class ValidationHook(tf.train.SessionRunHook):
 
@@ -174,14 +253,40 @@ class NeuralPosTagger:
                     print('#%d Accuracy: %s, Loss: %s' % (run_values.results, result['accuracy'], result['loss']))
 
         self.__estimator.train(
-            input_fn=lambda: self.__input_fn(train_set, epoch=10),
+            input_fn=lambda: self.__input_fn(train_set, epoch=self.__params['epoch_size']),
             hooks=[ValidationHook(self.__estimator, self.__input_fn, dev_set)],
         )
+        print('Training completed.')
 
-    def eval(self, inputs):
-        return self.__estimator.evaluate(
-            input_fn=lambda: self.__input_fn(inputs),
-        )['accuracy']
+    def evaluate(self, corpus_path):
+        test_set = []
+        test_corpus = Corpus(corpus_path)
+        for item in test_corpus.items():
+            test_set.append({
+                'x': list(self.__char_processor.transform(item['text']))[0],
+                'y': list(self.__tag_processor.transform(item['tag']))[0],
+                'length': item['length']
+            })
 
-    def predict(self, inputs):
-        return []
+        result = self.__estimator.evaluate(
+            input_fn=lambda: self.__input_fn(test_set),
+        )
+
+        print('Test: %d' % len(test_corpus))
+        print('Accuracy: %s, Loss: %s' % (result['accuracy'], result['loss']))
+
+    def predict(self, characters: list):
+        data_set = [{
+            'x': list(self.__char_processor.transform(characters))[0],
+            'y': [0 for _ in range(self.__params['max_length'])],
+            'length': len(characters)
+        }]
+
+        result = list(self.__estimator.predict(
+            input_fn=lambda: self.__input_fn(data_set),
+        ))[0][:len(characters)]
+
+        result = list(self.__tag_processor.reverse([result]))[0]
+        result = result.split(' ')
+
+        return result
