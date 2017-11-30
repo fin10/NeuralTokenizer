@@ -65,7 +65,7 @@ class NeuralPosTagger:
     def tag_tokenizer_fn(raw):
         return [raw.split(' ')]
 
-    def __input_fn(self, inputs, epoch=1):
+    def __input_fn(self, inputs, epoch=1, shuffle=False):
         batch_size = self.__params['batch_size'] if self.__params['batch_size'] > 0 else len(inputs)
         max_length = self.MAX_SENTENCE_LENGTH
 
@@ -87,7 +87,8 @@ class NeuralPosTagger:
              }, tf.TensorShape([max_length]))
         )
 
-        dataset = dataset.shuffle(batch_size)
+        if shuffle:
+            dataset = dataset.shuffle(batch_size)
         dataset = dataset.batch(batch_size)
         dataset = dataset.repeat(epoch)
 
@@ -142,21 +143,45 @@ class NeuralPosTagger:
         predictions = tf.argmax(outputs, 2)
 
         loss = None
-        eval_metric_ops = None
         if mode != tf.estimator.ModeKeys.PREDICT:
-            onehot_labels = tf.one_hot(labels, output_size, dtype=tf.float32)
             loss = tf.losses.softmax_cross_entropy(
-                onehot_labels=onehot_labels,
+                onehot_labels=tf.one_hot(labels, output_size, dtype=tf.float32),
                 logits=outputs,
                 weights=mask
             )
 
-            eval_metric_ops = {
-                'accuracy': tf.metrics.accuracy(
-                    labels=labels,
-                    predictions=predictions,
-                    weights=mask
+        eval_metric_ops = None
+        if mode == tf.estimator.ModeKeys.EVAL:
+            weights = []
+            precisions = []
+            recalls = []
+            for label in range(output_size):
+                y_true = tf.equal(labels, label)
+                y_pred = tf.equal(predictions, label)
+                weights.append(tf.metrics.mean(y_true, mask))
+                precisions.append(tf.metrics.precision(y_true, y_pred, mask))
+                recalls.append(tf.metrics.recall(y_true, y_pred, mask))
+
+            def compute_mean(values, weights):
+                return (
+                    tf.reduce_sum([tf.multiply(v[0], w[0]) for v, w in zip(values, weights)]),
+                    tf.reduce_sum([tf.multiply(v[1], w[1]) for v, w in zip(values, weights)]),
                 )
+
+            precision = compute_mean(precisions, weights)
+            recall = compute_mean(recalls, weights)
+
+            def compute_f1(precision, recall):
+                return (
+                    tf.multiply(2.0, tf.div(tf.multiply(precision[0], recall[0]), tf.add(precision[0], recall[0]))),
+                    tf.multiply(2.0, tf.div(tf.multiply(precision[1], recall[1]), tf.add(precision[1], recall[1])))
+                )
+
+            eval_metric_ops = {
+                'accuracy': tf.metrics.accuracy(labels, predictions, mask),
+                'precision': precision,
+                'recall': recall,
+                'f1': compute_f1(precision, recall)
             }
 
         train_op = None
@@ -241,10 +266,10 @@ class NeuralPosTagger:
                     result = self.__estimator.evaluate(
                         input_fn=lambda: self.__input_fn(self.__dataset),
                     )
-                    print('#%d Accuracy: %s, Loss: %s' % (run_values.results, result['accuracy'], result['loss']))
+                    print('#%d %s' % (run_values.results, result))
 
         self.__estimator.train(
-            input_fn=lambda: self.__input_fn(train_set, epoch=self.__params['epoch_size']),
+            input_fn=lambda: self.__input_fn(train_set, epoch=self.__params['epoch_size'], shuffle=True),
             hooks=[ValidationHook(self.__estimator, self.__input_fn, dev_set)],
         )
         print('Training completed.')
@@ -262,7 +287,7 @@ class NeuralPosTagger:
         )
 
         print('Test: %d' % len(test_corpus))
-        print('Accuracy: %s, Loss: %s' % (result['accuracy'], result['loss']))
+        print(result)
 
     def predict(self, characters: list):
         data_set = [{
