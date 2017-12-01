@@ -1,6 +1,8 @@
 import os
 import re
 
+from paths import Paths
+
 
 class Morpheme:
     __MORPHEME_PATTERN = re.compile('([^/]+)/([a-z]+)')
@@ -49,8 +51,7 @@ class Morpheme:
 
     def match(self, targets):
         if Morpheme.__matcher is None:
-            Morpheme.__matcher = Morpheme.Matcher(
-                os.path.join(os.path.dirname(os.path.abspath(__file__)), './res/complex_morpheme.dict'))
+            Morpheme.__matcher = Morpheme.Matcher(os.path.join(Paths.RES, 'complex_morpheme.dict'))
 
         tags = [None for _ in range(len(targets))]
         index = 0

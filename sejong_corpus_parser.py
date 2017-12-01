@@ -1,6 +1,8 @@
+import os
 import random
 
 from morpheme import Morpheme
+from paths import Paths
 
 
 class SejongCorpusParser:
@@ -64,10 +66,10 @@ class SejongCorpusParser:
 
 
 if __name__ == '__main__':
-    with open('./data/sejong.txt', encoding='utf-8') as fp:
+    with open(os.path.join(Paths.DATA, 'sejong.txt'), encoding='utf-8') as fp:
         texts = [line.strip() for line in fp]
 
-    with open('./data/sejong.pos', encoding='utf-8') as fp:
+    with open(os.path.join(Paths.DATA, 'sejong.pos'), encoding='utf-8') as fp:
         labels = [line.strip() for line in fp]
 
     print('texts:%d, labels:%d' % (len(texts), len(labels)))
@@ -76,10 +78,10 @@ if __name__ == '__main__':
 
     random.shuffle(corpus)
     pivot = int(len(corpus) * 0.8)
-    with open('./sejong_corpus.train', mode='w', encoding='utf-8') as fp:
+    with open(os.path.join(Paths.DATA, 'sejong_corpus.train'), mode='w', encoding='utf-8') as fp:
         for item in corpus[:pivot]:
             fp.write('%s\t%s\n' % (''.join(item.text()), ' '.join(item.labels())))
 
-    with open('./sejong_corpus.test', mode='w', encoding='utf-8') as fp:
+    with open(os.path.join(Paths.DATA, 'sejong_corpus.test'), mode='w', encoding='utf-8') as fp:
         for item in corpus[pivot:]:
             fp.write('%s\t%s\n' % (''.join(item.text()), ' '.join(item.labels())))
