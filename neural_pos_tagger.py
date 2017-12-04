@@ -1,9 +1,7 @@
 import os
 import random
 import shutil
-from collections import Counter
 
-import numpy as np
 import tensorflow as tf
 from tensorflow.contrib.learn.python.learn.preprocessing import VocabularyProcessor
 
@@ -238,11 +236,6 @@ class NeuralPosTagger:
         print('Training: %d' % len(training_corpus))
         print('Character: %d, Tag: %d' % (len(self.__char_processor.vocabulary_),
                                           len(self.__tag_processor.vocabulary_)))
-
-        lengths = [item['length'] for item in items]
-        print('# Length')
-        print('avg: %s, top: %s' % (np.mean(lengths), Counter(lengths).most_common(10)))
-        print('longest: %d, shortest: %d' % (max(lengths), min(lengths)))
 
         random.shuffle(items)
         pivot = int(len(items) * 0.8)
